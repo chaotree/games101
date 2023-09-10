@@ -40,7 +40,7 @@ auto to_vec4(const Eigen::Vector3f& v3, float w = 1.0f)
 }
 
 
-static bool insideTriangle(int x, int y, const Vector3f* _v)
+static bool insideTriangle(float x, float y, const Vector3f* _v)
 {   
     // TODO : Implement this function to check if the point (x, y) is inside the triangle represented by _v[0], _v[1], _v[2]
 
@@ -195,27 +195,42 @@ void rst::rasterizer::rasterize_triangle(const Triangle& t) {
     {
         for (int y = min_y; y <= max_y; y++)
         {
-            float min_depth = FLT_MAX; // C++中的最大数
+            //float depth = FLT_MAX; // C++中的最大数
 
-            if (insideTriangle(x, y, t.v)) { // t 是 triangle 对象
-                auto[alpha, beta, gamma] = computeBarycentric2D(x, y, t.v); // 要将 C++ 版本改为 C++17
-                float w_reciprocal = 1.0/(alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
+            // MSAA
+
+            float weight = 0.0f;
+            
+            for (float i = 0; i <= 1; i++) {
+                for (float j = 0; j <= 1; j++) {
+
+                    if (insideTriangle((float)x + 0.25 + i * 0.5, (float)y + 0.25 + j * 0.5, t.v)) { // t 是 triangle 对象
+
+                        weight += 0.25f;
+
+                    }
+                }
+            }
+
+            if (insideTriangle((float)x+0.5, (float)y+0.5, t.v)) {
+                auto [alpha, beta, gamma] = computeBarycentric2D((float)x, (float)y, t.v); // 要将 C++ 版本改为 C++17
+                float w_reciprocal = 1.0 / (alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
                 float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
                 z_interpolated *= w_reciprocal;
-                
-                min_depth = std::min(min_depth, z_interpolated);
-                
+
+                //depth = z_interpolated;
+
                 // depth_buf、get_index 在 rasterizer 类中定义
-                if (depth_buf[get_index(x, y)] > min_depth) {
+                if (z_interpolated < depth_buf[get_index(x, y)]) {
                     Vector3f color = t.getColor();
-                    Vector3f point(x, y, min_depth);
-                    depth_buf[get_index(x, y)] = min_depth;
-                    set_pixel(point, color);
+                    Vector3f point(x, y, z_interpolated);
+                    depth_buf[get_index(x, y)] = z_interpolated;
+                    set_pixel(point, color * weight);
+
                 }
-            };
+            }
 
         }
-        
     }
 
     // If so, use the following code to get the interpolated z value.
