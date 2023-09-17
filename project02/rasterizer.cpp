@@ -3,8 +3,8 @@
 // Created by goksu on 4/6/19.
 //
 
-#define MSAA
-//#define SSAA
+//#define MSAA
+#define SSAA_LEVEL 2
 
 #include <algorithm>
 #include <vector>
@@ -241,20 +241,22 @@ void rst::rasterizer::rasterize_triangle(const Triangle& t) {
 
 #endif
 
-#ifdef SSAA
+#ifdef SSAA_LEVEL
+
+    // 需要自定义 get_index_tmp()、set_tmp_pixel() 方法和 frame_buf_tmp、depth_buf_tmp 数组，修改 clear() 方法。
+
     for (int x = min_x; x <= max_x; x++)
     {
         for (int y = min_y; y <= max_y; y++)
         {
 
-            int SSAA_Level = 2;
-            float SSAA_Period = 1 / SSAA_Level;
+            float SSAA_Period = 1.0f / SSAA_LEVEL;
 
 
 
-            for (float i = 0; i < SSAA_Level; i++)
+            for (int i = 0; i < SSAA_LEVEL; i++)
             {
-                for (float j = 0; j < SSAA_Level; j++)
+                for (int j = 0; j < SSAA_LEVEL; ++j)
                 {
                     float tmp_x = (float)x + i * SSAA_Period;
                     float tmp_y = (float)y + j * SSAA_Period;
@@ -264,15 +266,20 @@ void rst::rasterizer::rasterize_triangle(const Triangle& t) {
 
                     if (insideTriangle(tmp_x_center, tmp_y_center, t.v))
                     {
-                        auto [alpha, beta, gamma] = computeBarycentric2D(tmp_x, tmp_y, t.v);
+                        auto [alpha, beta, gamma] = computeBarycentric2D(tmp_x_center, tmp_y_center, t.v);
                         float w_reciprocal = 1.0 / (alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
                         float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
                         z_interpolated *= w_reciprocal;
 
-                        if (z_interpolated < depth_buf[get_index(tmp_x, tmp_y)]) {
+                        // 定义 upscale 后的 index
+                        int upscale_pixel_x = x * SSAA_LEVEL + i;
+                        int upscale_pixel_y = y * SSAA_LEVEL + j;
+
+                        if (z_interpolated < depth_buf_tmp[get_index_tmp(upscale_pixel_x, upscale_pixel_y)])
+                        {
                             Vector3f color = t.getColor();
-                            Vector3f point(tmp_x, tmp_x, z_interpolated);
-                            depth_buf[get_index(x, y)] = z_interpolated;
+                            Vector3f point(upscale_pixel_x, upscale_pixel_y, 0.0f);
+                            depth_buf_tmp[get_index_tmp(upscale_pixel_x, upscale_pixel_y)] = z_interpolated;
                             set_tmp_pixel(point, color);
                         }
                     }
@@ -283,6 +290,32 @@ void rst::rasterizer::rasterize_triangle(const Triangle& t) {
 
         }
     }
+
+    // Downscale
+    for (int x = min_x; x <= max_x; x++)
+    {
+        for (int y = min_y; y <= max_y; y++)
+        {
+            Eigen::Vector3f color(0.0f, 0.0f, 0.0f);
+            Eigen::Vector3f point(x, y, 0.0f);
+
+            for (int i = 0; i < SSAA_LEVEL; ++i)
+            {
+                for (int j = 0; j < SSAA_LEVEL; ++j)
+                {
+                    // 定义 upscale 后的 index
+                    int upscale_pixel_x = x * SSAA_LEVEL + i;
+                    int upscale_pixel_y = y * SSAA_LEVEL + j;
+                    color += frame_buf_tmp[get_index_tmp(upscale_pixel_x, upscale_pixel_y)];
+                }
+            }
+
+            color /= SSAA_LEVEL * SSAA_LEVEL;
+            set_pixel(point, color);
+        }
+    }
+
+
 #endif
 
     // If so, use the following code to get the interpolated z value.
@@ -311,13 +344,16 @@ void rst::rasterizer::set_projection(const Eigen::Matrix4f& p)
 
 void rst::rasterizer::clear(rst::Buffers buff)
 {
-    if ((buff & rst::Buffers::Color) == rst::Buffers::Color)
+    // 枚举类型的位运算，用以判断传入的 Buffer 是 Color 还是 Depth。
+    if ((buff & rst::Buffers::Color) == rst::Buffers::Color) // 如果传入的参数为 rst::Buffers::Color，则运算为 1 & 1 = 1。
     {
         std::fill(frame_buf.begin(), frame_buf.end(), Eigen::Vector3f{0, 0, 0});
+        std::fill(frame_buf_tmp.begin(), frame_buf_tmp.end(), Eigen::Vector3f{ 0, 0, 0 }); // 清空 SSAA 的帧缓存。
     }
-    if ((buff & rst::Buffers::Depth) == rst::Buffers::Depth)
+    if ((buff & rst::Buffers::Depth) == rst::Buffers::Depth) // 如果传入的参数为 rst::Buffers::Buffer，则运算为 11 & 11 = 11。
     {
         std::fill(depth_buf.begin(), depth_buf.end(), std::numeric_limits<float>::infinity());
+        std::fill(depth_buf_tmp.begin(), depth_buf_tmp.end(), std::numeric_limits<float>::infinity());
     }
 }
 
@@ -325,11 +361,19 @@ rst::rasterizer::rasterizer(int w, int h) : width(w), height(h)
 {
     frame_buf.resize(w * h);
     depth_buf.resize(w * h);
+
+    frame_buf_tmp.resize(w * h * SSAA_LEVEL * SSAA_LEVEL);
+    depth_buf_tmp.resize(w * h * SSAA_LEVEL * SSAA_LEVEL);
 }
 
 int rst::rasterizer::get_index(int x, int y)
 {
     return (height-1-y)*width + x;
+}
+
+int rst::rasterizer::get_index_tmp(int x, int y) // SSAA 深度缓存索引
+{
+    return (height*SSAA_LEVEL - 1 - y) * width*SSAA_LEVEL + x;
 }
 
 void rst::rasterizer::set_pixel(const Eigen::Vector3f& point, const Eigen::Vector3f& color)
@@ -340,9 +384,10 @@ void rst::rasterizer::set_pixel(const Eigen::Vector3f& point, const Eigen::Vecto
 
 }
 
-void rst::rasterizer::set_tmp_pixel(const Eigen::Vector3f& point, const Eigen::Vector3f& color) // SSAA 时储存临时颜色。
+void rst::rasterizer::set_tmp_pixel(const Eigen::Vector3f& point, const Eigen::Vector3f& color) // SSAA 储存临时颜色。
 {
-
+    auto ind = (height*SSAA_LEVEL - 1 - point.y()) * width*SSAA_LEVEL + point.x(); // (height - 1 - point.y()) 是为了将原点从左上角移到左下角。
+    frame_buf_tmp[ind] = color;
 
 }
 
