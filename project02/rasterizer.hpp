@@ -68,6 +68,8 @@ namespace rst
 
         void set_pixel(const Eigen::Vector3f& point, const Eigen::Vector3f& color);
 
+        void set_tmp_pixel(const Eigen::Vector3f& point, const Eigen::Vector3f& color);
+
         void clear(Buffers buff);
 
         void draw(pos_buf_id pos_buffer, ind_buf_id ind_buffer, col_buf_id col_buffer, Primitive type);
@@ -91,6 +93,8 @@ namespace rst
         std::map<int, std::vector<Eigen::Vector3f>> col_buf;
 
         std::vector<Eigen::Vector3f> frame_buf;
+
+        std::vector<Eigen::Vector3f> frame_buf_tmp;
 
         std::vector<float> depth_buf;
         int get_index(int x, int y);

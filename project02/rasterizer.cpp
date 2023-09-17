@@ -3,6 +3,9 @@
 // Created by goksu on 4/6/19.
 //
 
+#define MSAA
+//#define SSAA
+
 #include <algorithm>
 #include <vector>
 #include "rasterizer.hpp"
@@ -191,6 +194,8 @@ void rst::rasterizer::rasterize_triangle(const Triangle& t) {
     //min_y = std::floor(min_y);
     //max_y = std::ceil(max_y);
 
+#ifdef MSAA
+
     for (int x = min_x; x <= max_x; x++)
     {
         for (int y = min_y; y <= max_y; y++)
@@ -198,6 +203,8 @@ void rst::rasterizer::rasterize_triangle(const Triangle& t) {
             //float depth = FLT_MAX; // C++中的最大数
 
             // MSAA
+
+
 
             float weight = 0.0f;
             
@@ -229,9 +236,54 @@ void rst::rasterizer::rasterize_triangle(const Triangle& t) {
 
                 }
             }
+        }
+    }
+
+#endif
+
+#ifdef SSAA
+    for (int x = min_x; x <= max_x; x++)
+    {
+        for (int y = min_y; y <= max_y; y++)
+        {
+
+            int SSAA_Level = 2;
+            float SSAA_Period = 1 / SSAA_Level;
+
+
+
+            for (float i = 0; i < SSAA_Level; i++)
+            {
+                for (float j = 0; j < SSAA_Level; j++)
+                {
+                    float tmp_x = (float)x + i * SSAA_Period;
+                    float tmp_y = (float)y + j * SSAA_Period;
+
+                    float tmp_x_center = tmp_x + SSAA_Period * 0.5;
+                    float tmp_y_center = tmp_y + SSAA_Period * 0.5;
+
+                    if (insideTriangle(tmp_x_center, tmp_y_center, t.v))
+                    {
+                        auto [alpha, beta, gamma] = computeBarycentric2D(tmp_x, tmp_y, t.v);
+                        float w_reciprocal = 1.0 / (alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
+                        float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
+                        z_interpolated *= w_reciprocal;
+
+                        if (z_interpolated < depth_buf[get_index(tmp_x, tmp_y)]) {
+                            Vector3f color = t.getColor();
+                            Vector3f point(tmp_x, tmp_x, z_interpolated);
+                            depth_buf[get_index(x, y)] = z_interpolated;
+                            set_tmp_pixel(point, color);
+                        }
+                    }
+
+
+                }
+            }
 
         }
     }
+#endif
 
     // If so, use the following code to get the interpolated z value.
     //auto[alpha, beta, gamma] = computeBarycentric2D(x, y, t.v);
@@ -285,6 +337,12 @@ void rst::rasterizer::set_pixel(const Eigen::Vector3f& point, const Eigen::Vecto
     //old index: auto ind = point.y() + point.x() * width;
     auto ind = (height-1-point.y())*width + point.x();
     frame_buf[ind] = color;
+
+}
+
+void rst::rasterizer::set_tmp_pixel(const Eigen::Vector3f& point, const Eigen::Vector3f& color) // SSAA 时储存临时颜色。
+{
+
 
 }
 
